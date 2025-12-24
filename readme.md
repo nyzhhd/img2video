@@ -5,8 +5,11 @@
 
 > 纯 OpenCV 内核，Streamlit 界面；本地一键跑，浏览器即可用。
 
+img2video_ppt.py
 ![主界面截图](resource/pic1.jpg)
 
+img2video.py
+![主界面截图2](resource/pic2.jpg)
 
 ## ⚡ 1 秒上手
 ```bash
