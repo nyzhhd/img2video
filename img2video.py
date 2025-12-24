@@ -1,59 +1,65 @@
-# smooth_img2video_v1.py
+# hz_img2video.py
+# @author: nyzhhd
 import streamlit as st
-import tempfile
+import cv2
+import numpy as np
+import tempfile, os
 from pathlib import Path
 from natsort import natsorted
-from moviepy.editor import ImageClip, concatenate_videoclips
 
-st.set_page_config(page_title="丝滑图片→视频", layout="centered")
-st.title("🎞️ 丝滑图片转视频（moviepy 1.0.3 版）")
+st.set_page_config(page_title="按频率图片→视频", layout="centered")
+st.title("📺 图片按固定频率转视频（无特效）")
 
 @st.cache_data(show_spinner=False)
-def make_smooth_video_v1(file_list, fps, duration_per_img):
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir = Path(tmpdir)
-        clips = []
+def make_hz_video(file_list, hz):
+    """hz = 每秒播放几张图（每张图重复 fps/hz 帧）"""
+    tmpdir = Path(os.getenv("TEMP", "C:/temp")) / "hz_video"
+    tmpdir.mkdir(exist_ok=True)
+    avi_path = str(tmpdir / "hz_video.avi")
 
-        for idx, file in enumerate(file_list):
-            img_path = tmpdir / f"{idx:03d}.jpg"
-            img_path.write_bytes(file.getbuffer())
+    # 拿尺寸
+    img_bytes = file_list[0].getvalue()
+    nparr = np.frombuffer(img_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    h, w = img.shape[:2]
 
-            # 基础片段
-            clip = ImageClip(str(img_path), duration=duration_per_img)
+    fourcc = cv2.VideoWriter_fourcc(*"XVID")
+    vw = cv2.VideoWriter(avi_path, fourcc, 30, (w, h))   # 固定 30 fps 输出
+    if not vw.isOpened():
+        raise RuntimeError("VideoWriter 无法打开")
 
-            # 1. 轻微缩放动画（1.0 → 1.08）
-            clip = clip.resize(lambda t: 1 + 0.08 * t / duration_per_img)
+    frames_per_pic = int(30 / hz)          # 30 fps 下的帧数
+    for file in file_list:
+        img_bytes = file.getvalue()
+        nparr = np.frombuffer(img_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        for _ in range(frames_per_pic):
+            vw.write(img)
 
-            # 2. 水平慢速平移（居中裁剪）
-            w, h = clip.w, clip.h
-            # 从 0 移到 0.08*w
-            clip = clip.set_position(lambda t: (-0.08 * w * t / duration_per_img, 'center'))
-            clip = clip.crop(x1=0, y1=0, width=w, height=h)  # 固定画幅
+    vw.release()
+    return avi_path
 
-            # 3. 淡入淡出
-            clip = clip.fadein(0.5).fadeout(0.5)
-
-            clips.append(clip)
-
-        final = concatenate_videoclips(clips, method="compose")
-        out_path = tmpdir / "smooth_v1.mp4"
-        final.write_videofile(str(out_path), fps=fps, codec="libx264", audio=False, logger=None)
-        return str(out_path)
-
-# ---------- UI 同之前 ----------
+# ---------------- 侧边栏 ----------------
 with st.sidebar:
-    fps = st.number_input("帧率 fps", 1, 60, 24)
-    duration = st.number_input("每张图片时长（秒）", 1.0, 10.0, 3.0, 0.5)
+    hz = st.radio("播放频率 Hz（张/秒）", [10, 5, 3, "自定义"], horizontal=True)
+    if hz == "自定义":
+        hz = st.number_input("自定义 Hz", 0.5, 60.0, 2.0, 0.5)
+    hz = float(hz)
     go = st.button("开始合成", type="primary")
 
-uploaded = st.file_uploader("上传图片（可多选）", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+# ---------------- 主界面 ----------------
+uploaded = st.file_uploader("上传图片（可多选，按文件名排序）",
+                            type=["jpg", "jpeg", "png"],
+                            accept_multiple_files=True)
 
 if go and uploaded:
     uploaded = natsorted(uploaded, key=lambda x: x.name)
-    with st.spinner("正在生成丝滑视频…"):
-        mp4_path = make_smooth_video_v1(uploaded, fps, duration)
+    with st.spinner(f"正在生成 {hz} Hz 视频…"):
+        avi_path = make_hz_video(uploaded, hz)
     st.success("完成！")
-    with open(mp4_path, "rb") as f:
-        st.download_button("⬇ 下载 smooth_v1.mp4", data=f, file_name="smooth_v1.mp4", mime="video/mp4")
+    with open(avi_path, "rb") as f:
+        st.download_button(f"⬇ 下载 {hz}Hz.avi", data=f,
+                          file_name=f"{hz}Hz.avi",
+                          mime="video/x-msvideo")
 else:
-    st.info("上传图片 → 侧边栏调参数 → 点“开始合成”")
+    st.info("上传图片 → 侧边栏选频率 → 点“开始合成”")
